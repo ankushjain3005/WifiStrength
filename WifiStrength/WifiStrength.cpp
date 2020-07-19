@@ -9,13 +9,85 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <map>
+#include <string>
+#include <iostream>
 
 // Need to link with Wlanapi.lib and Ole32.lib
 #pragma comment(lib, "wlanapi.lib")
 #pragma comment(lib, "ole32.lib")
 
+class WifiStrength {
 
-int wmain()
+private:
+    HANDLE hClient = NULL;
+    DWORD dwMaxClient = 2;      //    
+    DWORD dwCurVersion = 0;
+    PWLAN_INTERFACE_INFO_LIST pIfList = NULL;
+
+    bool initHandle() {
+        if (hClient == NULL) {
+            DWORD dwResult = WlanOpenHandle(dwMaxClient, NULL, &dwCurVersion, &hClient);
+            if (dwResult != ERROR_SUCCESS) {
+                wprintf(L"WlanOpenHandle failed with error: %u\n", dwResult);
+                return false;
+            }
+        }
+        return true;
+    }
+
+public:
+    PWLAN_INTERFACE_INFO_LIST getWlanInterfaces() {
+        if (pIfList != NULL) {
+            return pIfList;
+        }
+
+        if (initHandle()) {
+            DWORD dwResult = WlanEnumInterfaces(hClient, NULL, &pIfList);
+            if (dwResult != ERROR_SUCCESS) {
+                wprintf(L"WlanEnumInterfaces failed with error: %u\n", dwResult);
+                return NULL;
+                // You can use FormatMessage here to find out why the function failed
+            }
+        }
+        return pIfList;
+    }
+
+    PWLAN_AVAILABLE_NETWORK_LIST getUpdatedAvailableNetworkList(WLAN_INTERFACE_INFO * pWlanInterface) {
+        PWLAN_AVAILABLE_NETWORK_LIST pBssList;
+        DWORD dwResult = WlanGetAvailableNetworkList(hClient,
+            &pWlanInterface->InterfaceGuid,
+            0,
+            NULL,
+            &pBssList);
+        if (dwResult != ERROR_SUCCESS) {
+            wprintf(L"WlanGetAvailableNetworkList failed with error: %u\n",
+                dwResult);
+            return NULL;
+        }
+        return pBssList;
+    }
+
+    std::map<std::string, int> getSSIDtoStrengthMap(PWLAN_AVAILABLE_NETWORK_LIST pBssList) {
+        std::map<std::string, int> ssidToStrengthMap;
+        if (pBssList == NULL) {
+            return ssidToStrengthMap;
+        }
+        for (int j = 0; j < pBssList->dwNumberOfItems; j++) {
+            PWLAN_AVAILABLE_NETWORK pBssEntry =
+                (WLAN_AVAILABLE_NETWORK *)&pBssList->Network[j];
+            std::string ssid="";
+            for (int i = 0; i < pBssEntry->dot11Ssid.uSSIDLength; i++) {
+                ssid+=(static_cast<char>(pBssEntry->dot11Ssid.ucSSID[i]));
+            }
+            ssidToStrengthMap.insert(std::make_pair(ssid, pBssEntry->wlanSignalQuality));
+        }
+        return ssidToStrengthMap;
+    }
+};
+
+
+int WlanGetAvailableNetworkList()
 {
 
     // Declare and initialize variables.
@@ -259,4 +331,18 @@ int wmain()
     }
 
     return dwRetVal;
+}
+
+int wmain() {
+    WifiStrength wifiStrength;
+    PWLAN_INTERFACE_INFO_LIST interafceList = wifiStrength.getWlanInterfaces();
+    PWLAN_AVAILABLE_NETWORK_LIST networkList = wifiStrength.getUpdatedAvailableNetworkList(&interafceList->InterfaceInfo[0]);
+    std::map<std::string, int> ssidStrengthMap = wifiStrength.getSSIDtoStrengthMap(networkList);
+    auto iterator = ssidStrengthMap.begin();
+    for (; iterator != ssidStrengthMap.end(); iterator++) {
+        std::cout << "SSID : " << iterator->first << " Strength: " << iterator->second << std::endl;
+    }
+    std::cout << "---------------------------------------------------------------------------------";
+
+    //WlanGetAvailableNetworkList();
 }
